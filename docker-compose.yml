@@ -1,0 +1,109 @@
+version: "3.9"
+
+services:
+  traefik:
+    image: traefik:v3.1
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/acme.json:/etc/traefik/acme.json
+    environment:
+      - TZ=${TZ}
+    networks:
+      - web
+
+  # One-shot restore (run first if you have an existing DB in B2)
+  litestream-init:
+    image: litestream/litestream:latest
+    container_name: litestream-init
+    restart: "no"
+    command: >
+      /bin/sh -c "litestream restore -config /etc/litestream.yml
+      -if-db-not-exists -if-replica-exists /var/www/html/data/${SQLITE_DB}"
+    environment:
+      - AWS_REGION=${AWS_REGION}
+      - LITESTREAM_ACCESS_KEY_ID=${LITESTREAM_ACCESS_KEY_ID}
+      - LITESTREAM_SECRET_ACCESS_KEY=${LITESTREAM_SECRET_ACCESS_KEY}
+    volumes:
+      - nextcloud_data:/var/www/html:rw
+      - ./litestream.yml:/etc/litestream.yml:ro
+    networks:
+      - web
+
+  # WAL mode is enabled via a one-off PHP exec (no extra image needed)
+
+  nextcloud:
+    image: nextcloud:stable-apache
+    container_name: nextcloud
+    restart: unless-stopped
+    depends_on:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nextcloud.rule=Host(`${NEXTCLOUD_HOST}`)"
+      - "traefik.http.routers.nextcloud.entrypoints=websecure"
+      - "traefik.http.routers.nextcloud.tls=true"
+      - "traefik.http.routers.nextcloud.tls.certresolver=letsresolver"
+      - "traefik.http.services.nextcloud.loadbalancer.server.port=80"
+    volumes:
+      - nextcloud_data:/var/www/html
+      # Hook scripts to apply env-driven config (e.g., object store) at startup
+      - ./scripts/nextcloud-hooks/before-starting:/docker-entrypoint-hooks.d/before-starting:ro
+    environment:
+      - TZ=${TZ}
+      - NEXTCLOUD_ADMIN_USER=${NEXTCLOUD_ADMIN_USER}
+      - NEXTCLOUD_ADMIN_PASSWORD=${NEXTCLOUD_ADMIN_PASSWORD}
+      - OVERWRITEPROTOCOL=${OVERWRITEPROTOCOL}
+      - NEXTCLOUD_TRUSTED_DOMAINS=${NEXTCLOUD_TRUSTED_DOMAINS}
+      # Pass object store envs into the container so hooks (and initial install) can use them
+      - OBJECTSTORE_S3_BUCKET=${OBJECTSTORE_S3_BUCKET}
+      - OBJECTSTORE_S3_REGION=${OBJECTSTORE_S3_REGION}
+      - OBJECTSTORE_S3_HOST=${OBJECTSTORE_S3_HOST}
+      - OBJECTSTORE_S3_PORT=${OBJECTSTORE_S3_PORT}
+      - OBJECTSTORE_S3_KEY=${OBJECTSTORE_S3_KEY}
+      - OBJECTSTORE_S3_SECRET=${OBJECTSTORE_S3_SECRET}
+      - OBJECTSTORE_S3_SSL=${OBJECTSTORE_S3_SSL}
+      - OBJECTSTORE_S3_USEPATH_STYLE=${OBJECTSTORE_S3_USEPATH_STYLE}
+      - OBJECTSTORE_S3_LEGACYAUTH=${OBJECTSTORE_S3_LEGACYAUTH}
+      - OBJECTSTORE_S3_AUTOCREATE=${OBJECTSTORE_S3_AUTOCREATE}
+      - OBJECTSTORE_FORCE=${OBJECTSTORE_FORCE}
+      # Mail settings can be configured in Nextcloud web UI or via occ later
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1/status.php | grep -q 'installed' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+    networks:
+      - web
+
+  # Litestream continuous replicate sidecar
+  litestream:
+    image: litestream/litestream:latest
+    container_name: litestream
+    restart: unless-stopped
+    command: ["replicate", "-config", "/etc/litestream.yml"]
+    environment:
+      - AWS_REGION=${AWS_REGION}
+      - LITESTREAM_ACCESS_KEY_ID=${LITESTREAM_ACCESS_KEY_ID}
+      - LITESTREAM_SECRET_ACCESS_KEY=${LITESTREAM_SECRET_ACCESS_KEY}
+    volumes:
+      - nextcloud_data:/var/www/html:rw
+      - ./litestream.yml:/etc/litestream.yml:ro
+    depends_on:
+      - nextcloud
+    networks:
+      - web
+
+
+volumes:
+  nextcloud_data:
+
+networks:
+  web:
+    external: false

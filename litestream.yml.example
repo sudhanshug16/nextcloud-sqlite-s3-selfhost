@@ -1,0 +1,13 @@
+dbs:
+  - path: /var/www/html/data/owncloud.db
+    snapshots:
+      interval: 1h
+      retention: 72h
+    replicas:
+      - url: s3://your-bucket-name/litestream-sqlite/owncloud.db
+        type: s3
+        # For Backblaze B2, set endpoint and region accordingly
+        endpoint: https://s3.eu-central-003.backblazeb2.com
+        region: eu-central-003
+        force-path-style: true
+        sync-interval: 1s

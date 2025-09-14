@@ -1,0 +1,13 @@
+# Local secrets and environment
+.env
+
+# Sensitive runtime files
+traefik/acme.json
+litestream.yml
+traefik/traefik.yml
+
+# Common junk
+.DS_Store
+.idea/
+.vscode/
+*.log
