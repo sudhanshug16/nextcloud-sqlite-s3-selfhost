@@ -24,6 +24,13 @@ chmod +x scripts/nextcloud-hooks/before-starting/*.sh || true
 # Defaults and helpers
 to_bool() { case "${1:-}" in true|TRUE|True|1) echo true ;; *) echo false ;; esac; }
 
+# Warn if Redis is enabled but password is empty (causes PHP session issues)
+if [ -n "${REDIS_HOST:-}" ] && [ -z "${REDIS_PASSWORD:-}" ]; then
+  echo "[setup] WARNING: REDIS_HOST set but REDIS_PASSWORD is empty."
+  echo "        This can break PHP sessions and cause login loops."
+  echo "        Set REDIS_PASSWORD in .env and re-run this script."
+fi
+
 # --- Render Traefik static config ---
 TRAEFIK_EMAIL=${TRAEFIK_ACME_EMAIL:-}
 if [ -z "${TRAEFIK_EMAIL}" ]; then

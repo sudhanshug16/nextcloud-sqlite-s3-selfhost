@@ -66,6 +66,15 @@ See `.env.example` for all variables. Most important:
 - A startup hook also applies/updates Redis + memcache settings for existing installs.
 - Defaults: host `redis`, port `6379`. Optional password via `REDIS_PASSWORD`.
 - The setup script writes `redis/redis.conf` (appendonly on; requires password if set).
+- Important: Set a non-empty `REDIS_PASSWORD` when using Redis. The Nextcloud image
+  enables Redis-backed PHP sessions when `REDIS_HOST` is set; if the password is
+  empty, PHP can attempt `auth=` with a blank value and session startup fails,
+  resulting in login loops. Either set `REDIS_PASSWORD` (recommended) or disable
+  Redis sessions by overriding PHP to use file sessions instead.
+
+  - Recommended: set `REDIS_PASSWORD` in `.env`, re-run `scripts/setup.sh`, and `docker compose up -d`.
+  - Alternative (advanced): set `PHP_SESSION_SAVE_HANDLER=files` in the Nextcloud service
+    environment to keep file-based sessions while still using Redis for locking via occ.
 
 ## SMTP setup and troubleshooting
 - For new installs, the Nextcloud image reads SMTP envs on first boot: `SMTP_HOST`, `SMTP_SECURE`, `SMTP_PORT`, `SMTP_AUTHTYPE`, `SMTP_NAME`, `SMTP_PASSWORD`, `MAIL_FROM_ADDRESS`, `MAIL_DOMAIN`.
@@ -89,6 +98,7 @@ See `.env.example` for all variables. Most important:
   - `MAIL_FROM_ADDRESS` is the local-part only (no `@domain`). `MAIL_DOMAIN` is the domain.
   - Ensure credentials are correct and the provider allows SMTP from your server IP.
   - If you changed envs after first install, use the `occ` commands above and restart Nextcloud.
+
 
 ## License
 No license specified. Add one if you plan to publish.
