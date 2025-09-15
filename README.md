@@ -8,6 +8,8 @@ This repository contains a Docker Compose setup for running Nextcloud behind Tra
 - SQLite database replicated to B2 using Litestream
 - One-shot Litestream restore job for first-time recovery
 - Primary object store configuration via env (S3-compatible / B2)
+- Redis for file locking and caching
+- SMTP configuration (via env on first install, via occ later)
 
 ## Prerequisites
 - Docker and Docker Compose
@@ -15,11 +17,9 @@ This repository contains a Docker Compose setup for running Nextcloud behind Tra
 - Backblaze B2 (or S3-compatible) credentials
 
 ## Quick Start
-1. Copy example files and fill in values:
+1. Create a single env file and render configs:
    - `cp .env.example .env` and edit
-   - `cp litestream.yml.example litestream.yml` and edit
-   - `mkdir -p traefik && cp traefik/traefik.yml.example traefik/traefik.yml`
-   - `touch traefik/acme.json && chmod 600 traefik/acme.json`
+   - `bash scripts/setup.sh` (generates `traefik/traefik.yml`, `litestream.yml`, `redis/redis.conf`, ensures `traefik/acme.json`)
 
 2. (Optional) If restoring an existing database from B2, run the init job once:
    - `docker compose run --rm litestream-init`
@@ -36,13 +36,17 @@ See `.env.example` for all variables. Most important:
 - `SQLITE_DB` (defaults to `owncloud.db`)
 - Object store: `OBJECTSTORE_S3_*` (bucket, host, key, secret, etc.)
 - Litestream: `AWS_REGION`, `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY`
+- Redis: `REDIS_HOST`, optional `REDIS_HOST_PORT`, optional `REDIS_PASSWORD`
+- SMTP: `SMTP_HOST`, `SMTP_SECURE`, `SMTP_PORT`, `SMTP_AUTHTYPE`, `SMTP_NAME`, `SMTP_PASSWORD`, `MAIL_FROM_ADDRESS`, `MAIL_DOMAIN`
 
 ## Files and Structure
 - `docker-compose.yml` — stack definition
 - `scripts/nextcloud-hooks/before-starting/10-objectstore.sh` — applies primary object store config via `occ`
-- `litestream.yml` — runtime Litestream config (ignored by git). Use `litestream.yml.example` to create it
-- `traefik/traefik.yml` — runtime Traefik config (ignored by git). Use `traefik/traefik.yml.example` to create it
+- `scripts/setup.sh` — generates runtime configs from `.env`
+- `litestream.yml` — generated runtime Litestream config (ignored by git)
+- `traefik/traefik.yml` — generated runtime Traefik config (ignored by git)
 - `traefik/acme.json` — issued cert data (sensitive; ignored by git)
+- `redis/redis.conf` — generated Redis config (ignored by git)
 
 ## Litestream Notes
 - `litestream-init` is a one-shot job to restore if a replica exists and the DB file does not. Safe to run on first boot.
@@ -54,8 +58,37 @@ See `.env.example` for all variables. Most important:
 - Confirm object store: `docker compose exec nextcloud php occ config:system:get objectstore`
 
 ## Security
-- Do not commit secrets. `.env`, `litestream.yml`, `traefik/acme.json`, and `traefik/traefik.yml` are ignored by default.
-- Ensure `traefik/acme.json` has mode `0600`.
+- Do not commit secrets. `.env`, `litestream.yml`, `traefik/acme.json`, and `traefik/traefik.yml` are ignored by default and are generated from `.env`.
+- Ensure `traefik/acme.json` has mode `0600` (the setup script enforces this).
+
+## Redis
+- Enabled via `redis` service. Nextcloud auto-configures if `REDIS_HOST` is provided.
+- A startup hook also applies/updates Redis + memcache settings for existing installs.
+- Defaults: host `redis`, port `6379`. Optional password via `REDIS_PASSWORD`.
+- The setup script writes `redis/redis.conf` (appendonly on; requires password if set).
+
+## SMTP setup and troubleshooting
+- For new installs, the Nextcloud image reads SMTP envs on first boot: `SMTP_HOST`, `SMTP_SECURE`, `SMTP_PORT`, `SMTP_AUTHTYPE`, `SMTP_NAME`, `SMTP_PASSWORD`, `MAIL_FROM_ADDRESS`, `MAIL_DOMAIN`.
+- For existing installs, change settings via `occ` (envs are not re-applied automatically):
+
+  - `docker compose exec -u www-data nextcloud php occ config:system:set mail_smtpmode --value="smtp"`
+  - `docker compose exec -u www-data nextcloud php occ config:system:set mail_smtphost --value="$SMTP_HOST"`
+  - `docker compose exec -u www-data nextcloud php occ config:system:set mail_smtpport --value="$SMTP_PORT"`
+  - `docker compose exec -u www-data nextcloud php occ config:system:set mail_smtpsecure --value="$SMTP_SECURE"` # ssl or tls
+  - `docker compose exec -u www-data nextcloud php occ config:system:set mail_smtpauth --value="1"`
+  - `docker compose exec -u www-data nextcloud php occ config:system:set mail_smtpauthtype --value="$SMTP_AUTHTYPE"`
+  - `docker compose exec -u www-data nextcloud php occ config:system:set mail_smtpname --value="$SMTP_NAME"`
+  - `docker compose exec -u www-data nextcloud php occ config:system:set mail_smtppassword --value="$SMTP_PASSWORD"`
+  - `docker compose exec -u www-data nextcloud php occ config:system:set mail_from_address --value="$MAIL_FROM_ADDRESS"`
+  - `docker compose exec -u www-data nextcloud php occ config:system:set mail_domain --value="$MAIL_DOMAIN"`
+
+- Verify current values:
+  - `docker compose exec -u www-data nextcloud php occ config:list system | grep -i mail`
+- Common pitfalls:
+  - Use matching `SMTP_SECURE`/`SMTP_PORT`: `ssl` + `465`, or `tls` + `587`.
+  - `MAIL_FROM_ADDRESS` is the local-part only (no `@domain`). `MAIL_DOMAIN` is the domain.
+  - Ensure credentials are correct and the provider allows SMTP from your server IP.
+  - If you changed envs after first install, use the `occ` commands above and restart Nextcloud.
 
 ## License
 No license specified. Add one if you plan to publish.

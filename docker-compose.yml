@@ -43,6 +43,7 @@ services:
     restart: unless-stopped
     depends_on:
       - traefik
+      - redis
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.nextcloud.rule=Host(`${NEXTCLOUD_HOST}`)"
@@ -60,6 +61,10 @@ services:
       - NEXTCLOUD_ADMIN_PASSWORD=${NEXTCLOUD_ADMIN_PASSWORD}
       - OVERWRITEPROTOCOL=${OVERWRITEPROTOCOL}
       - NEXTCLOUD_TRUSTED_DOMAINS=${NEXTCLOUD_TRUSTED_DOMAINS}
+      # Redis for locking/cache (applied by Nextcloud entrypoint on first install)
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_HOST_PORT=${REDIS_HOST_PORT}
+      - REDIS_HOST_PASSWORD=${REDIS_PASSWORD}
       # Pass object store envs into the container so hooks (and initial install) can use them
       - OBJECTSTORE_S3_BUCKET=${OBJECTSTORE_S3_BUCKET}
       - OBJECTSTORE_S3_REGION=${OBJECTSTORE_S3_REGION}
@@ -72,7 +77,15 @@ services:
       - OBJECTSTORE_S3_LEGACYAUTH=${OBJECTSTORE_S3_LEGACYAUTH}
       - OBJECTSTORE_S3_AUTOCREATE=${OBJECTSTORE_S3_AUTOCREATE}
       - OBJECTSTORE_FORCE=${OBJECTSTORE_FORCE}
-      # Mail settings can be configured in Nextcloud web UI or via occ later
+      # SMTP (applies on first install via entrypoint)
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_SECURE=${SMTP_SECURE}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_AUTHTYPE=${SMTP_AUTHTYPE}
+      - SMTP_NAME=${SMTP_NAME}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS}
+      - MAIL_DOMAIN=${MAIL_DOMAIN}
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1/status.php | grep -q 'installed' || exit 1"]
       interval: 30s
@@ -100,9 +113,22 @@ services:
     networks:
       - web
 
+  # Redis for file locking and caching
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - web
+
 
 volumes:
   nextcloud_data:
+  redis_data:
 
 networks:
   web:

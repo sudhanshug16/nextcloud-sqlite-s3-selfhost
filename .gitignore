@@ -5,6 +5,7 @@
 traefik/acme.json
 litestream.yml
 traefik/traefik.yml
+redis/redis.conf
 
 # Common junk
 .DS_Store
